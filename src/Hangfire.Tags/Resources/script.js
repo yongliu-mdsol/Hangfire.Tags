@@ -23,4 +23,5 @@ $(function() {
     };
 
     $(".tags a").tagcloud();
+
 });

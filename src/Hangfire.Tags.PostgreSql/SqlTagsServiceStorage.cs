@@ -4,34 +4,34 @@ using System.Data.Common;
 using System.Linq;
 using Dapper;
 using Hangfire.Common;
-using Hangfire.SqlServer;
+using Hangfire.PostgreSql;
 using Hangfire.Storage;
 using Hangfire.Storage.Monitoring;
 using Hangfire.Tags.Dashboard.Monitoring;
 using Hangfire.Tags.Storage;
 
-namespace Hangfire.Tags.SqlServer
+namespace Hangfire.Tags.PostgreSql
 {
 
-    public class SqlTagsServiceStorage : ITagsServiceStorage
+    public class PostgreSqlTagsServiceStorage : ITagsServiceStorage
     {
-        private readonly SqlServerStorageOptions _options;
+        private readonly PostgreSqlStorageOptions _options;
 
-        private SqlTagsMonitoringApi MonitoringApi => new SqlTagsMonitoringApi(JobStorage.Current.GetMonitoringApi());
+        private PostgreSqlTagsMonitoringApi MonitoringApi => new PostgreSqlTagsMonitoringApi(JobStorage.Current.GetMonitoringApi());
 
-        public SqlTagsServiceStorage()
-            : this(new SqlServerStorageOptions())
+        public PostgreSqlTagsServiceStorage()
+            : this(new PostgreSqlStorageOptions())
         {
         }
 
-        public SqlTagsServiceStorage(SqlServerStorageOptions options)
+        public PostgreSqlTagsServiceStorage(PostgreSqlStorageOptions options)
         {
             _options = options;
         }
 
         public ITagsTransaction GetTransaction(IWriteOnlyTransaction transaction)
         {
-            return new SqlTagsTransaction(_options, transaction);
+            return new PostgreSqlTagsTransaction(_options, transaction);
         }
 
         public IEnumerable<TagDto> SearchWeightedTags(string tag, string setKey)
@@ -43,32 +43,32 @@ namespace Hangfire.Tags.SqlServer
                     tag = "[^0-9]"; // Exclude tags:<id> entries
 
                 var sql =
-                    $@"select count(*) as Amount from [{_options.SchemaName}].[Set] s where s.[Key] like @setKey + ':%' + @tag + '%'";
-                var total = connection.ExecuteScalar<int>(sql, new {setKey, tag});
+                    $@"select count(*) as Amount from ""{_options.SchemaName}"".Set s WHERE s.Key SIMILAR TO 'tags:%[^0-9]%'";
+                var total = connection.ExecuteScalar<int>(sql, new { setKey, tag });
 
                 sql =
-                    $@"select STUFF([Key], 1, 5, '') AS [Tag], COUNT(*) AS [Amount], CAST(ROUND(count(*) * 1.0 / @total * 100, 0) AS INT) as [Percentage] 
-from [{_options.SchemaName}].[Set] s where s.[Key] like @setKey + ':%' + @tag + '%' group by s.[Key]";
+                    $@"select STUFF(Key, 1, 5, '') AS Tag, COUNT(*) AS Amount, CAST(ROUND(count(*) * 1.0 / @total * 100, 0) AS INT) as Percentage
+from ""{_options.SchemaName}"".Set s where s.Key like @setKey + ':%' + @tag + '%' group by s.Key";
 
                 return connection.Query<TagDto>(
                     sql,
                     new { setKey, tag, total },
-                    commandTimeout: (int?)_options.CommandTimeout?.TotalSeconds);
+                    commandTimeout: (int?)_options.TransactionSynchronisationTimeout.TotalSeconds);
             });
         }
-        
+
         public IEnumerable<string> SearchTags(string tag, string setKey)
         {
             var monitoringApi = MonitoringApi;
             return monitoringApi.UseConnection(connection =>
             {
                 var sql =
-                    $@"select [Value] from [{_options.SchemaName}].[Set] s where s.[Key] like @setKey + ':%' + @tag + '%'";
+                    $@"select Value from ""{_options.SchemaName}"".""Set"" s where s.Key like @setKey + ':%' + @tag + '%'";
 
                 return connection.Query<string>(
                     sql,
-                    new {setKey, tag},
-                    commandTimeout: (int?) _options.CommandTimeout?.TotalSeconds);
+                    new { setKey, tag },
+                    commandTimeout: (int?)_options.TransactionSynchronisationTimeout.TotalSeconds);
             });
         }
 
@@ -89,27 +89,27 @@ from [{_options.SchemaName}].[Set] s where s.[Key] like @setKey + ':%' + @tag + 
                     $@";with cte as 
 (
   select j.Id, row_number() over (order by j.Id desc) as row_num
-  from [{_options.SchemaName}].Job j with (nolock, forceseek)";
+  from ""{_options.SchemaName}"".Job j with (nolock, forceseek)";
 
                 for (var i = 0; i < tags.Length; i++)
                 {
                     parameters["tag" + i] = tags[i];
                     jobsSql +=
-                        $"  inner join [{_options.SchemaName}].[Set] s{i} on j.Id=s{i}.Value and s{i}.[Key]=@tag{i}";
+                        $"  inner join \"{_options.SchemaName}\".\"Set\" s{i} on j.Id=s{i}.Value and s{i}.Key=@tag{i}";
                 }
 
                 jobsSql +=
                     $@")
-select top {maxTags} j.StateName AS [Key], count(*) AS [Value]
-from [{_options.SchemaName}].Job j with (nolock)
+select top {maxTags} j.StateName AS Key, count(*) AS Value
+from ""{_options.SchemaName}"".Job j with (nolock)
 inner join cte on cte.Id = j.Id 
-inner join [{_options.SchemaName}].State s with (nolock) on j.StateId = s.Id
+inner join ""{_options.SchemaName}"".State s with (nolock) on j.StateId = s.Id
 group by j.StateName order by count(*) desc";
 
                 return connection.Query<KeyValuePair<string, int>>(
                         jobsSql,
                         parameters,
-                        commandTimeout: (int?) _options.CommandTimeout?.TotalSeconds)
+                        commandTimeout: (int?)_options.TransactionSynchronisationTimeout.TotalSeconds)
                     .ToDictionary(d => d.Key, d => d.Value);
             });
         }
@@ -132,7 +132,7 @@ group by j.StateName order by count(*) desc";
         private DateTime? GetStateDate(SafeDictionary<string, string> stateData, string stateName)
         {
             var stateDateName = stateName == "Processing" ? "StartedAt" : $"{stateName}At";
-            return DateTime.TryParse(stateData?[stateDateName], out var result) ? result.ToUniversalTime() : (DateTime?) null;
+            return DateTime.TryParse(stateData?[stateDateName], out var result) ? result.ToUniversalTime() : (DateTime?)null;
         }
 
         private int GetJobCount(DbConnection connection, string[] tags, string stateName)
@@ -146,12 +146,12 @@ group by j.StateName order by count(*) desc";
                 $@";with cte as 
 (
   select j.Id, row_number() over (order by j.Id desc) as row_num
-  from [{_options.SchemaName}].Job j with (nolock, forceseek)";
+  from ""{_options.SchemaName}"".Job j with (nolock, forceseek)";
 
             for (var i = 0; i < tags.Length; i++)
             {
                 parameters["tag" + i] = tags[i];
-                jobsSql += $"  inner join [{_options.SchemaName}].[Set] s{i} on j.Id=s{i}.Value and s{i}.[Key]=@tag{i}";
+                jobsSql += $"  inner join \"{_options.SchemaName}\".Set s{i} on j.Id=s{i}.Value and s{i}.[Key]=@tag{i}";
             }
 
             jobsSql +=
@@ -159,19 +159,19 @@ group by j.StateName order by count(*) desc";
   where (@stateName IS NULL OR LEN(@stateName)=0 OR j.StateName=@stateName)
 )
 select count(*)
-from [{_options.SchemaName}].Job j with (nolock)
+from ""{_options.SchemaName}"".Job j with (nolock)
 inner join cte on cte.Id = j.Id 
-left join [{_options.SchemaName}].State s with (nolock) on j.StateId = s.Id";
+left join ""{_options.SchemaName}"".State s with (nolock) on j.StateId = s.Id";
 
             return connection.ExecuteScalar<int>(
                 jobsSql,
                 parameters,
-                commandTimeout: (int?) _options.CommandTimeout?.TotalSeconds);
+                commandTimeout: (int?)_options.TransactionSynchronisationTimeout.TotalSeconds);
         }
 
         private JobList<TDto> GetJobs<TDto>(
             DbConnection connection, int from, int count, string[] tags, string stateName,
-            Func<SqlJob, Job, SafeDictionary<string, string>, TDto> selector)
+            Func<PostgreSqlJob, Job, SafeDictionary<string, string>, TDto> selector)
         {
             var parameters = new Dictionary<string, object>
             {
@@ -184,29 +184,29 @@ left join [{_options.SchemaName}].State s with (nolock) on j.StateId = s.Id";
                 $@";with cte as 
 (
   select j.Id, row_number() over (order by j.Id desc) as row_num
-  from [{_options.SchemaName}].Job j with (nolock, forceseek)";
+  from ""{_options.SchemaName}"".Job j with (nolock, forceseek)";
 
             for (var i = 0; i < tags.Length; i++)
             {
                 parameters["tag" + i] = tags[i];
-                jobsSql += $"  inner join [{_options.SchemaName}].[Set] s{i} on j.Id=s{i}.Value and s{i}.[Key]=@tag{i}";
+                jobsSql += $"  inner join \"{_options.SchemaName}\".[Set] s{i} on j.Id=s{i}.Value and s{i}.[Key]=@tag{i}";
             }
 
-            jobsSql += 
+            jobsSql +=
 $@"
   where (@stateName IS NULL OR LEN(@stateName) = 0 OR j.StateName=@stateName)
 )
 select j.*, s.Reason as StateReason, s.Data as StateData
-from [{_options.SchemaName}].Job j with (nolock)
+from ""{_options.SchemaName}"".Job j with (nolock)
 inner join cte on cte.Id = j.Id 
-left join [{_options.SchemaName}].State s with (nolock) on j.StateId = s.Id
+left join ""{_options.SchemaName}"".State s with (nolock) on j.StateId = s.Id
 where cte.row_num between @start and @end 
 order by j.Id desc";
 
-            var jobs = connection.Query<SqlJob>(
+            var jobs = connection.Query<PostgreSqlJob>(
                     jobsSql,
                     parameters,
-                    commandTimeout: (int?) _options.CommandTimeout?.TotalSeconds)
+                    commandTimeout: (int?)_options.TransactionSynchronisationTimeout.TotalSeconds)
                 .ToList();
 
             return DeserializeJobs(jobs, selector);
@@ -229,8 +229,8 @@ order by j.Id desc";
         }
 
         private static JobList<TDto> DeserializeJobs<TDto>(
-            ICollection<SqlJob> jobs,
-            Func<SqlJob, Job, SafeDictionary<string, string>, TDto> selector)
+            ICollection<PostgreSqlJob> jobs,
+            Func<PostgreSqlJob, Job, SafeDictionary<string, string>, TDto> selector)
         {
             var result = new List<KeyValuePair<string, TDto>>(jobs.Count);
 

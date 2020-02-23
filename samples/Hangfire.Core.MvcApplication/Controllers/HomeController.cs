@@ -2,7 +2,11 @@
 using Microsoft.AspNetCore.Mvc;
 using Hangfire.Core.MvcApplication.Models;
 using Hangfire.Server;
+using Hangfire.Tags;
 using Hangfire.Tags.Attributes;
+using System;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace Hangfire.Core.MvcApplication.Controllers
 {
@@ -26,17 +30,40 @@ namespace Hangfire.Core.MvcApplication.Controllers
         }
 
         [HttpPost]
-        public ActionResult Create()
+        public async Task<ActionResult> Create()
         {
-            BackgroundJob.Enqueue(() => Job("Home", null));
-            TextBuffer.WriteLine("Background job has been created.");
+
+
+            await DoAsync(0);
+            TextBuffer.WriteLine("Background Job completed succesfully!");
 
             return RedirectToAction("Index");
         }
 
+        [JobDisplayName("my custom job $#{0}")]
+        public Task DoAsync(int id)
+        {
+            BackgroundJob.Enqueue(() => Process($"segment{id}", $"study{id}", null));
+            return Task.CompletedTask;
+        }
+
+        [JobDisplayName("my custom job $#{0} and study name {1}")]
+        public void Process(string segmentName, string studyName, PerformContext cx)
+        {
+            var now = DateTime.Now;
+
+            cx.AddTags(new string[] { segmentName,studyName, Guid.NewGuid().ToString() });
+
+        }
+
+
         [Tag("job", "{0}", "{1}")]
         public void Job(string name, PerformContext ctx)
         {
+            var now = DateTime.Now;
+
+            ctx.AddTags(new string[] { "Segment" + now.Second.ToString(), "Study" + now.Second + now.Millisecond, Guid.NewGuid().ToString() });
+
             TextBuffer.WriteLine("Background Job completed succesfully!");
         }
     }
