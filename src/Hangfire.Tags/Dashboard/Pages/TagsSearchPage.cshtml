@@ -46,7 +46,6 @@
         }
         <!-- Add search box here -->
         <div class="js-search">
-
         </div>
 
         @{
@@ -64,11 +63,15 @@
                 else
                 {
                     <div class="tags">
-                        @foreach (var t in allTags)
-                        {
-                            var intValue = (int)Math.Round(t.Percentage);
-                            <a href="@Url.To("/tags/search/" + @t.Tag)" rel="@intValue">@t.Tag</a>
-                        }
+                        <datalist id="mytags">
+                            @foreach (var t in allTags)
+                            {
+                                <option value="@t.Tag" />
+                            }
+                        </datalist>
+                        <input class="form-control" width="400px" id="selectedTag" list="mytags" multiple placeholder="select a tag">
+
+                        <button class="btn" onclick="location.href = '@Url.To("/tags/search/")' + document.getElementById('selectedTag').value">Search</button>
                     </div>
                 }
             }

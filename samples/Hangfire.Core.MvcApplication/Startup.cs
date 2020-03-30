@@ -1,18 +1,12 @@
-﻿using System;
-using System.IO;
-using Hangfire.Common;
-using Hangfire.Dashboard;
-using Hangfire.Heartbeat;
-using Hangfire.MemoryStorage;
-using Hangfire.SqlServer;
-using Hangfire.Tags;
-using Hangfire.Tags.SqlServer;
+﻿using Hangfire.Tags.PostgreSql;
+using Hangfire.PostgreSql;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Hangfire.Heartbeat;
+using System;
 
 namespace Hangfire.Core.MvcApplication
 {
@@ -30,27 +24,23 @@ namespace Hangfire.Core.MvcApplication
         {
             services.Configure<CookiePolicyOptions>(options =>
             {
-                // This lambda determines whether user consent for non-essential cookies is needed for a given request.
+                // This lambda determines whether user consent for non-essential cookies is needed
+                // for a given request.
                 options.CheckConsentNeeded = context => true;
                 options.MinimumSameSitePolicy = SameSiteMode.None;
             });
 
             services.AddHangfire(config =>
             {
-                config.UseMemoryStorage();
-//                config.UseSqlServerStorage(Configuration.GetConnectionString("DefaultConnection"), new SqlServerStorageOptions
-//                {
-//                    SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5), // To enable Sliding invisibility fetching
-//                    CommandBatchMaxTimeout = TimeSpan.FromMinutes(5), // To enable command pipelining
-//                    QueuePollInterval = TimeSpan.FromTicks(1) // To reduce processing delays to minimum
-//                });
+                //config.UseMemoryStorage();
+                config.UsePostgreSqlStorage(Configuration.GetConnectionString("DefaultConnection"));
 
-                config.UseTags();
-//                config.UseNLogLogProvider();
+                config.UseTagsWithPostgreSql();
+                // config.UseNLogLogProvider();
                 config.UseHeartbeatPage(checkInterval: TimeSpan.FromSeconds(5));
             });
 
-            services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_2_2);
+            services.AddMvc(options => options.EnableEndpointRouting = false);
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -77,12 +67,6 @@ namespace Hangfire.Core.MvcApplication
                     name: "default",
                     template: "{controller=Home}/{action=Index}/{id?}");
             });
-
-            var recurringJobs = new RecurringJobManager();
-
-            RecurringJob.AddOrUpdate<Tasks>(x => x.SuccessTask(null, null), Cron.Minutely);
-            //            RecurringJob.AddOrUpdate<Tasks>(x => x.FailedTask(null, null), "*/2 * * * *");
-            recurringJobs.AddOrUpdate("Failed Task", Job.FromExpression<Tasks>(x => x.FailedTask(null)), "*/2 * * * *", TimeZoneInfo.Local);
         }
     }
 }

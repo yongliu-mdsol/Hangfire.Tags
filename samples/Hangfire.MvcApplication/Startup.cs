@@ -1,6 +1,5 @@
 ﻿using System;
 using Hangfire.Common;
-using Hangfire.Tags.SqlServer;
 using Microsoft.Owin;
 using Owin;
 
